@@ -36,6 +36,147 @@ This creates a grid with 40 levels between 0.99 and 1.0, with each grid step bei
 
 - Python 3.10+
 - hyperliquid-python-sdk
+- pandas
+- numpy
+- matplotlib
+- requests
+- eth_account
+
+## Deployment on Railway
+
+Railway is a modern platform that makes it easy to deploy and run your grid trading bot 24/7 without having to manage servers. Here's how to deploy your bot on Railway:
+
+### Prerequisites
+
+1. Create a [Railway account](https://railway.app/)
+2. Install the [Railway CLI](https://docs.railway.app/develop/cli)
+3. Fork this repository on GitHub
+
+### Step 1: Prepare your project
+
+Create the following files in your project directory if they don't already exist:
+
+#### requirements.txt
+
+```
+hyperliquid-python-sdk>=0.0.8
+pandas>=2.0.0
+numpy>=1.24.0
+matplotlib>=3.7.0
+requests>=2.28.0
+eth-account>=0.8.0
+```
+
+#### Procfile
+
+```
+worker: python main.py
+```
+
+#### main.py
+
+```python
+#!/usr/bin/env python3
+"""
+Main entry point for the Hyperliquid Grid Trading Bot
+"""
+
+import os
+import time
+import logging
+from grid_trader import GridTrader
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+def main():
+    # Get config path from environment variable or use default
+    config_path = os.environ.get("CONFIG_PATH", "config.json")
+    
+    # Create grid trader instance
+    try:
+        trader = GridTrader(config_path)
+        logger.info("Grid trader initialized successfully")
+        
+        # Initialize grid
+        trader.initialize_grid()
+        logger.info("Grid initialized successfully")
+        
+        # Main loop
+        while True:
+            try:
+                # Update grid
+                trader.update_grid()
+                logger.info("Grid updated successfully")
+                
+                # Sleep for a while
+                time.sleep(60)  # Check every minute
+            except Exception as e:
+                logger.error(f"Error updating grid: {e}")
+                time.sleep(60)  # Wait before retrying
+    except Exception as e:
+        logger.error(f"Error initializing grid trader: {e}")
+
+if __name__ == "__main__":
+    main()
+```
+
+### Step 2: Set up Railway
+
+1. Login to Railway using the CLI:
+   ```
+   railway login
+   ```
+
+2. Initialize your project:
+   ```
+   railway init
+   ```
+
+3. Create a new Railway project:
+   ```
+   railway project create
+   ```
+
+4. Link your local project to the Railway project:
+   ```
+   railway link
+   ```
+
+### Step 3: Configure Environment Variables
+
+Instead of using a local config.json file, you'll need to set your private key as an environment variable in Railway:
+
+1. Go to your project on the Railway dashboard
+2. Navigate to the "Variables" tab
+3. Add the following variables:
+   - `SECRET_KEY`: Your Hyperliquid private key
+   - `ACCOUNT_ADDRESS`: (Optional) Your Hyperliquid address
+
+### Step 4: Deploy to Railway
+
+1. Deploy your project:
+   ```
+   railway up
+   ```
+
+2. Monitor your deployment on the Railway dashboard
+
+### Step 5: Verify Deployment
+
+1. Check the logs in the Railway dashboard to ensure your bot is running correctly
+2. Your grid trading bot should now be running 24/7 on Railway
+
+### Important Notes
+
+- Railway's free tier has limitations, so you may need to upgrade to a paid plan for continuous operation
+- Always monitor your bot's performance and be prepared to stop it if necessary
+- Never share your private key or config file with anyone
+- hyperliquid-python-sdk
 - numpy
 
 ## Installation
