@@ -1,0 +1,4 @@
+{
+    "secret_key": "YOUR_ETHEREUM_PRIVATE_KEY_HERE",
+    "account_address": "YOUR_ETHEREUM_ADDRESS_HERE (optional)"
+}
