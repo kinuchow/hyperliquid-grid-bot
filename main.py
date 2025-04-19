@@ -7,6 +7,7 @@ import os
 import time
 import json
 import logging
+import eth_account
 from grid_trader import GridTrader
 
 # Configure logging
