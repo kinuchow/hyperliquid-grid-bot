@@ -1,4 +1,4 @@
 {
-    "secret_key": "YOUR_ETHEREUM_PRIVATE_KEY_HERE",
-    "account_address": "YOUR_ETHEREUM_ADDRESS_HERE (optional)"
+    "secret_key": "YOUR_HYPERLIQUID_PRIVATE_KEY_HERE",
+    "account_address": "YOUR_HYPERLIQUID_ADDRESS_HERE (optional)"
 }
