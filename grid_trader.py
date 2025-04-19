@@ -2,11 +2,29 @@
 import json
 import time
 import numpy as np
+import logging
 from typing import Dict, List, Optional, Any, Tuple
-from hyperliquid.exchange import Exchange
-from hyperliquid.info import Info
-from hyperliquid.utils import constants
-import eth_account
+
+# Configure logging if not already configured
+logger = logging.getLogger(__name__)
+
+# Import hyperliquid packages
+try:
+    from hyperliquid.exchange import Exchange
+    from hyperliquid.info import Info
+    from hyperliquid.utils import constants
+    logger.info("Successfully imported hyperliquid packages")
+except ImportError as e:
+    logger.error(f"Failed to import hyperliquid packages: {e}")
+    raise
+
+# Import eth_account
+try:
+    import eth_account
+    logger.info("Successfully imported eth_account")
+except ImportError as e:
+    logger.error(f"Failed to import eth_account: {e}")
+    raise
 
 class GridTrader:
     """
@@ -36,8 +54,20 @@ class GridTrader:
         
         # Load configuration
         self.config = self._load_config(config_path)
-        self.account = eth_account.Account.from_key(self.config["secret_key"])
+        
+        # Create Ethereum account from private key
+        try:
+            logger.info("Creating Ethereum account from private key")
+            self.account = eth_account.Account.from_key(self.config["secret_key"])
+            logger.info("Successfully created Ethereum account")
+        except Exception as e:
+            logger.error(f"Error creating Ethereum account: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            raise
+            
         self.address = self.config.get("account_address", "") or self.account.address
+        logger.info(f"Using address: {self.address}")
         
         # Initialize API clients
         self.info = Info(constants.MAINNET_API_URL)

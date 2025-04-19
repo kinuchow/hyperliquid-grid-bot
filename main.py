@@ -19,11 +19,39 @@ logger = logging.getLogger(__name__)
 
 def create_config_from_env():
     """Create a config.json file from environment variables"""
-    secret_key = os.environ.get("SECRET_KEY")
-    account_address = os.environ.get("ACCOUNT_ADDRESS", "")
+    # Try different possible environment variable names for secret_key
+    possible_secret_keys = [
+        "secret_key", "SECRET_KEY",
+        "RAILWAY_SECRET_KEY", "RAILWAY_VAR_SECRET_KEY",
+        "HYPERLIQUID_SECRET_KEY", "PRIVATE_KEY"
+    ]
+    
+    # Try different possible environment variable names for account_address
+    possible_address_keys = [
+        "account_address", "ACCOUNT_ADDRESS",
+        "RAILWAY_ACCOUNT_ADDRESS", "RAILWAY_VAR_ACCOUNT_ADDRESS",
+        "HYPERLIQUID_ADDRESS", "ADDRESS"
+    ]
+    
+    # Find secret_key
+    secret_key = None
+    for key in possible_secret_keys:
+        if key in os.environ:
+            secret_key = os.environ.get(key)
+            logger.info(f"Found secret key using variable: {key}")
+            break
+    
+    # Find account_address
+    account_address = ""
+    for key in possible_address_keys:
+        if key in os.environ:
+            account_address = os.environ.get(key)
+            logger.info(f"Found account address using variable: {key}")
+            break
     
     if not secret_key:
-        raise ValueError("SECRET_KEY environment variable is required")
+        logger.error("No secret key found in environment variables")
+        raise ValueError("No secret key found in environment variables")
     
     config = {
         "secret_key": secret_key,
