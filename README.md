@@ -7,7 +7,7 @@ This bot implements a grid trading strategy for the FEUSD/USDC trading pair on H
 The bot follows these rules:
 1. After each sell order is filled, a new buy order is automatically placed one grid level below the executed sell price.
 2. After each buy order is filled, a new sell order is automatically placed one grid level above the executed buy price.
-3. The bot maintains exactly 5 active orders at all times (configurable via GRID_LEVELS).
+3. The bot maintains exactly 40 active orders at all times (configurable via GRID_LEVELS).
 4. The level closest to the current market price is excluded when placing initial orders.
 
 ## Configuration
@@ -16,10 +16,10 @@ All configuration parameters can be easily modified in the `grid_trader.py` file
 
 ```python
 # Grid Trading Configuration
-self.GRID_UPPER_BOUNDARY = 1.001  # Upper price boundary
-self.GRID_LOWER_BOUNDARY = 0.999  # Lower price boundary
-self.GRID_LEVELS = 5              # Number of active orders to maintain
-self.GRID_ORDER_SIZE = 20         # Size of each order in base currency
+self.GRID_UPPER_BOUNDARY = 1.0    # Upper price boundary
+self.GRID_LOWER_BOUNDARY = 0.99   # Lower price boundary
+self.GRID_LEVELS = 40             # Number of active orders to maintain
+self.GRID_ORDER_SIZE = 200        # Size of each order in base currency
 
 # Trading pair configuration
 self.SYMBOL = "FEUSD/USDC"        # Trading pair symbol
@@ -30,7 +30,7 @@ self.SPOT_ASSET_INDEX = 153       # Spot asset index on Hyperliquid
 
 The bot is currently configured for FEUSD/USDC (spot asset index 153), but can be adapted to trade any spot pair on Hyperliquid by changing the `SYMBOL` and `SPOT_ASSET_INDEX` values. You can find the asset index for other trading pairs in the Hyperliquid documentation or API.
 
-This creates a grid with 5 levels between 0.999 and 1.001, with each grid step being approximately 0.0004.
+This creates a grid with 40 levels between 0.99 and 1.0, with each grid step being approximately 0.00025. The increased number of grid levels and tighter grid spacing allows for more frequent trading opportunities.
 
 ## Requirements
 
