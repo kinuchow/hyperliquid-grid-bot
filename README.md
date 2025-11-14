@@ -156,6 +156,7 @@ Instead of using a local config.json file, you'll need to set your private key a
 3. Add the following variables:
    - `SECRET_KEY`: Your Hyperliquid private key
    - `ACCOUNT_ADDRESS`: (Optional) Your Hyperliquid address
+   - `SUBACCOUNT_ADDRESS`: (Optional) Vault/subaccount to trade from while signing with the master key
 
 ### Step 4: Deploy to Railway
 
@@ -190,9 +191,12 @@ pip install hyperliquid-python-sdk numpy
 ```json
 {
   "secret_key": "YOUR_PRIVATE_KEY_HERE",
-  "account_address": ""  // Optional, leave empty to use the address derived from the private key
+  "account_address": "",  // Optional, leave empty to use the address derived from the private key
+  "vault_address": ""     // Optional vault/subaccount address, leave blank to trade directly from the signer
 }
 ```
+
+Set `vault_address` (or the `SUBACCOUNT_ADDRESS` env var) when you want to run the bot on behalf of a Hyperliquid vault or subaccount; the configured `secret_key` still signs every action, but the Exchange client forwards those actions to the specified vault.
 
 ## Usage
 

@@ -73,6 +73,12 @@ def create_config_from_env():
         "RAILWAY_ACCOUNT_ADDRESS", "RAILWAY_VAR_ACCOUNT_ADDRESS",
         "HYPERLIQUID_ADDRESS", "ADDRESS"
     ]
+    possible_vault_keys = [
+        "vault_address", "VAULT_ADDRESS",
+        "subaccount_address", "SUBACCOUNT_ADDRESS",
+        "RAILWAY_VAULT_ADDRESS", "RAILWAY_VAR_VAULT_ADDRESS",
+        "RAILWAY_SUBACCOUNT_ADDRESS", "RAILWAY_VAR_SUBACCOUNT_ADDRESS"
+    ]
     
     # Find secret_key
     secret_key = _lookup_env_value(possible_secret_keys, env_file_values)
@@ -84,13 +90,19 @@ def create_config_from_env():
     if account_address:
         logger.info("Found account address in environment data")
     
+    # Find optional vault/subaccount address
+    vault_address = _lookup_env_value(possible_vault_keys, env_file_values) or ""
+    if vault_address:
+        logger.info("Found vault/subaccount address in environment data")
+    
     if not secret_key:
         logger.error("No secret key found in environment variables")
         raise ValueError("No secret key found in environment variables")
     
     config = {
         "secret_key": secret_key,
-        "account_address": account_address
+        "account_address": account_address,
+        "vault_address": vault_address
     }
     
     with open("config.json", "w") as f:

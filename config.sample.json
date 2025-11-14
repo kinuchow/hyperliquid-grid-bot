@@ -1,4 +1,5 @@
 {
     "secret_key": "YOUR_HYPERLIQUID_PRIVATE_KEY_HERE",
-    "account_address": "YOUR_HYPERLIQUID_ADDRESS_HERE (optional)"
+    "account_address": "YOUR_HYPERLIQUID_ADDRESS_HERE (optional)",
+    "vault_address": "OPTIONAL_SUBACCOUNT_OR_VAULT_ADDRESS"
 }

@@ -156,9 +156,20 @@ class GridTrader:
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             raise
-            
-        self.address = self.config.get("account_address", "") or self.account.address
-        logger.info(f"Using address: {self.address}")
+
+        # Track signer (master) vs trading (subaccount/vault) addresses
+        self.account_address = self.config.get("account_address", "") or self.account.address
+        vault_addr = (self.config.get("vault_address") or "").strip()
+        self.vault_address = vault_addr or None
+        self.address = self.vault_address or self.account_address
+        if self.vault_address:
+            logger.info(
+                "Using signer address %s for vault/subaccount %s",
+                self.account_address,
+                self.vault_address,
+            )
+        else:
+            logger.info(f"Using address: {self.address}")
         
         # Initialize API clients
         perp_dexs = [self.DEX] if self.DEX else None
@@ -166,7 +177,8 @@ class GridTrader:
         self.exchange = Exchange(
             self.account,
             constants.MAINNET_API_URL,
-            account_address=self.address,
+            account_address=self.account_address,
+            vault_address=self.vault_address,
             perp_dexs=perp_dexs
         )
 
