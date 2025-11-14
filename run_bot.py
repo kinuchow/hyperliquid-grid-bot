@@ -30,13 +30,7 @@ def check_imports():
     for package in required_packages:
         try:
             logger.info(f"Checking import for {package}")
-            if "." in package:
-                parts = package.split(".")
-                module = importlib.import_module(parts[0])
-                for part in parts[1:]:
-                    module = getattr(module, part)
-            else:
-                importlib.import_module(package)
+            importlib.import_module(package)
             logger.info(f"Successfully imported {package}")
         except ImportError as e:
             logger.error(f"Failed to import {package}: {e}")

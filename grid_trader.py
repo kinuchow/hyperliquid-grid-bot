@@ -1,12 +1,78 @@
 #!/usr/bin/env python3
 import json
+import os
 import time
 import numpy as np
 import logging
-from typing import Dict, List, Optional, Any, Tuple
+from decimal import Decimal, ROUND_HALF_UP
+from typing import Dict, List, Optional, Any, Tuple, Callable
 
 # Configure logging if not already configured
 logger = logging.getLogger(__name__)
+
+_ENV_FILE_CACHE: Optional[Dict[str, str]] = None
+
+def _load_env_file(path: str) -> Dict[str, str]:
+    """Load KEY=VALUE pairs from a .env file if it exists."""
+    env_vars: Dict[str, str] = {}
+    try:
+        if not os.path.exists(path):
+            return env_vars
+        with open(path, "r") as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if line.startswith("export "):
+                    line = line[len("export "):].strip()
+                if "#" in line:
+                    line = line.split("#", 1)[0].strip()
+                if "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if key and value:
+                    env_vars[key] = value
+    except Exception as exc:
+        logger.warning("Unable to parse env file %s: %s", path, exc)
+    return env_vars
+
+def _get_env_value(key: str) -> Optional[str]:
+    """Retrieve value for key from environment or .env file cache."""
+    value = os.environ.get(key)
+    if value is not None:
+        return value
+    global _ENV_FILE_CACHE
+    if _ENV_FILE_CACHE is None:
+        env_file_path = os.environ.get("GRID_ENV_FILE", ".env")
+        _ENV_FILE_CACHE = _load_env_file(env_file_path)
+    return _ENV_FILE_CACHE.get(key) if _ENV_FILE_CACHE else None
+
+def _env_or_default(key: str, default: Any, caster: Callable[[str], Any]) -> Any:
+    """
+    Read an environment variable, cast it, and fall back to a default if unset/invalid.
+    """
+    value = _get_env_value(key)
+    if value is None:
+        return default
+    stripped = value.strip()
+    if not stripped:
+        return default
+    try:
+        return caster(stripped)
+    except (ValueError, TypeError):
+        logger.warning("Invalid value for %s=%s. Using default %s", key, value, default)
+        return default
+
+def _round_value_to_tick(value: float, tick: Optional[float]) -> float:
+    """Round a numeric value to the configured tick size."""
+    if not tick:
+        return round(value, 6)
+    tick_dec = Decimal(str(tick))
+    scaled = (Decimal(str(value)) / tick_dec).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    rounded = scaled * tick_dec
+    return float(rounded)
 
 # Import hyperliquid packages
 try:
@@ -39,15 +105,40 @@ class GridTrader:
         Args:
             config_path: Path to the configuration file
         """
-        # Grid Trading Configuration
-        self.GRID_UPPER_BOUNDARY = 1
-        self.GRID_LOWER_BOUNDARY = 0.99
-        self.GRID_LEVELS = 40
-        self.GRID_ORDER_SIZE = 200
+        # Grid Trading Configuration (can be overridden via environment variables)
+        self.GRID_UPPER_BOUNDARY = _env_or_default("GRID_UPPER_BOUNDARY", 1.0, float)
+        self.GRID_LOWER_BOUNDARY = _env_or_default("GRID_LOWER_BOUNDARY", 0.99, float)
+        self.GRID_LEVELS = _env_or_default("GRID_LEVELS", 40, int)
+        self.GRID_ORDER_SIZE = _env_or_default("GRID_ORDER_SIZE", 200, float)
         
-        # Trading pair configuration
-        self.SYMBOL = "FEUSD/USDC"
-        self.SPOT_ASSET_INDEX = 153
+        # Trading pair and market configuration
+        self.SYMBOL = _env_or_default("GRID_SYMBOL", "FEUSD/USDC", str)
+        self.SPOT_ASSET_INDEX = _env_or_default("GRID_SPOT_ASSET_INDEX", 153, int)
+        self.MARKET_TYPE = _env_or_default("GRID_MARKET_TYPE", "spot", str).lower()
+        self.BASE_ASSET = _env_or_default("GRID_BASE_ASSET", "FEUSD", str)
+        self.QUOTE_ASSET = _env_or_default("GRID_QUOTE_ASSET", "USDC", str)
+        self.COLLATERAL_ASSET = _env_or_default("GRID_COLLATERAL_ASSET", self.QUOTE_ASSET, str)
+        self.PERP_DEX = _env_or_default("GRID_PERP_DEX", "", str)
+        self.DEX = self.PERP_DEX if self.MARKET_TYPE == "perp" else ""
+        tick_size_value = _get_env_value("GRID_TICK_SIZE")
+        self.TICK_SIZE = float(tick_size_value) if tick_size_value not in (None, "") else None
+        if self.TICK_SIZE is not None and self.TICK_SIZE <= 0:
+            self.TICK_SIZE = None
+        logger.info(
+            "Grid config: symbol=%s asset_index=%s upper=%s lower=%s levels=%s order_size=%s market=%s base=%s quote=%s collateral=%s perp_dex=%s tick=%s",
+            self.SYMBOL,
+            self.SPOT_ASSET_INDEX,
+            self.GRID_UPPER_BOUNDARY,
+            self.GRID_LOWER_BOUNDARY,
+            self.GRID_LEVELS,
+            self.GRID_ORDER_SIZE,
+            self.MARKET_TYPE,
+            self.BASE_ASSET,
+            self.QUOTE_ASSET,
+            self.COLLATERAL_ASSET,
+            self.PERP_DEX or "(default)",
+            self.TICK_SIZE or "auto",
+        )
         
         # Calculate grid step size
         self.GRID_STEP = (self.GRID_UPPER_BOUNDARY - self.GRID_LOWER_BOUNDARY) / self.GRID_LEVELS
@@ -70,14 +161,28 @@ class GridTrader:
         logger.info(f"Using address: {self.address}")
         
         # Initialize API clients
-        self.info = Info(constants.MAINNET_API_URL)
-        self.exchange = Exchange(self.account, constants.MAINNET_API_URL, account_address=self.address)
+        perp_dexs = [self.DEX] if self.DEX else None
+        self.info = Info(constants.MAINNET_API_URL, perp_dexs=perp_dexs)
+        self.exchange = Exchange(
+            self.account,
+            constants.MAINNET_API_URL,
+            account_address=self.address,
+            perp_dexs=perp_dexs
+        )
+
+        coin_name = self.info.name_to_coin.get(self.SYMBOL)
+        if coin_name:
+            self.SPOT_ASSET_INDEX = self.info.coin_to_asset.get(coin_name, self.SPOT_ASSET_INDEX)
         
         # Store active orders
         self.active_orders: Dict[float, Dict[str, Any]] = {}
         
         # Generate grid levels
         self.grid_levels = self.generate_levels()
+        if len(self.grid_levels) >= 2:
+            computed_step = round(self.grid_levels[1] - self.grid_levels[0], 6)
+            if computed_step > 0:
+                self.GRID_STEP = computed_step
         
         # Track order history to detect fills
         self.order_history = {}
@@ -103,8 +208,9 @@ class GridTrader:
         """
         # Generate grid levels from lower to upper boundary
         levels = np.linspace(self.GRID_LOWER_BOUNDARY, self.GRID_UPPER_BOUNDARY, self.GRID_LEVELS + 1)
-        # Round to 6 decimal places for precision
-        return [round(level, 6) for level in levels]
+        rounded_levels = [_round_value_to_tick(float(level), self.TICK_SIZE) for level in levels]
+        unique_levels = sorted(set(rounded_levels))
+        return [round(level, 6) for level in unique_levels]
     
     def get_current_market_price(self) -> float:
         """
@@ -171,34 +277,88 @@ class GridTrader:
         
         return None
     
-    def check_balances(self) -> Dict[str, float]:
-        """
-        Check available balances for trading.
+    def _get_perp_account_state(self) -> Optional[Dict]:
+        """Fetch perpetual account summary for collateral calculations."""
+        if self.MARKET_TYPE != "perp":
+            return None
+        try:
+            return self.info.user_state(self.address, self.DEX)
+        except Exception as e:
+            print(f"Error getting perp account state: {e}")
+            return None
+    
+    def _get_perp_collateral_balance(self) -> float:
+        """Extract available collateral from the perp account state."""
+        builder_value = 0.0
+        state = self._get_perp_account_state()
+        if state:
+            withdrawable = state.get("withdrawable")
+            if withdrawable is not None:
+                try:
+                    builder_value = max(builder_value, float(withdrawable))
+                except (ValueError, TypeError):
+                    pass
+            
+            margin_summary = state.get("marginSummary") or {}
+            account_value = margin_summary.get("accountValue")
+            if account_value is not None:
+                try:
+                    builder_value = max(builder_value, float(account_value))
+                except (ValueError, TypeError):
+                    pass
         
-        Returns:
-            Dictionary with available balances for FEUSD and USDC
-        """
-        balances = {
-            "FEUSD": 0.0,
-            "USDC": 0.0
-        }
-        
+        spot_value = 0.0
         try:
             spot_user_state = self.info.spot_user_state(self.address)
-            for balance in spot_user_state["balances"]:
-                coin = balance.get("coin", "")
-                total = float(balance["total"])
-                hold = float(balance["hold"])
-                available = total - hold
-                
-                if coin == "FEUSD":
-                    balances["FEUSD"] = available
-                elif coin == "USDC":
-                    balances["USDC"] = available
-            
-            print(f"Available balances - FEUSD: {balances['FEUSD']}, USDC: {balances['USDC']}")
+            for balance in spot_user_state.get("balances", []):
+                coin = balance.get("coin")
+                if coin == self.COLLATERAL_ASSET:
+                    total = float(balance.get("total", 0))
+                    hold = float(balance.get("hold", 0))
+                    available = max(0.0, total - hold)
+                    spot_value = max(spot_value, available)
         except Exception as e:
-            print(f"Error checking balances: {e}")
+            print(f"Error getting spot collateral fallback: {e}")
+        
+        return max(builder_value, spot_value)
+    
+    def check_balances(self) -> Dict[str, float]:
+        """
+        Check available balances/collateral for trading.
+        
+        Returns:
+            Dictionary with available balances for configured assets
+        """
+        balances = {
+            self.BASE_ASSET: 0.0,
+            self.QUOTE_ASSET: 0.0,
+            self.COLLATERAL_ASSET: 0.0,
+        }
+        
+        if self.MARKET_TYPE == "spot":
+            try:
+                spot_user_state = self.info.spot_user_state(self.address)
+                for balance in spot_user_state["balances"]:
+                    coin = balance.get("coin", "")
+                    total = float(balance.get("total", 0))
+                    hold = float(balance.get("hold", 0))
+                    available = total - hold
+                    
+                    if coin == self.BASE_ASSET:
+                        balances[self.BASE_ASSET] = available
+                    elif coin == self.QUOTE_ASSET:
+                        balances[self.QUOTE_ASSET] = available
+                
+                print(
+                    f"Available balances - {self.BASE_ASSET}: {balances[self.BASE_ASSET]}, "
+                    f"{self.QUOTE_ASSET}: {balances[self.QUOTE_ASSET]}"
+                )
+            except Exception as e:
+                print(f"Error checking balances: {e}")
+        else:
+            collateral = self._get_perp_collateral_balance()
+            balances[self.COLLATERAL_ASSET] = collateral
+            print(f"Available collateral - {self.COLLATERAL_ASSET}: {collateral}")
         
         return balances
     
@@ -260,7 +420,7 @@ class GridTrader:
         existing_orders = {}
         
         try:
-            open_orders = self.info.open_orders(self.address)
+            open_orders = self.info.open_orders(self.address, self.DEX)
             
             for order in open_orders:
                 if order.get("coin") == self.SYMBOL or order.get("coin") == f"@{self.SPOT_ASSET_INDEX}":
@@ -311,21 +471,37 @@ class GridTrader:
         try:
             # Round price to 6 decimal places
             price = round(price, 6)
+            price = _round_value_to_tick(price, self.TICK_SIZE)
             
             # Check if we already have an order at this price
             if price in self.active_orders:
                 print(f"Already have an order at price {price}. Skipping.")
                 return None
             
-            # Check if we have enough balance
+            # Check balances depending on market type
             balances = self.check_balances()
-            usdc_needed = self.GRID_ORDER_SIZE * price
+            order_notional = self.GRID_ORDER_SIZE * price
             
-            if balances["USDC"] < usdc_needed:
-                print(f"Insufficient USDC balance. Have: {balances['USDC']}, Need: {usdc_needed}")
-                return None
+            if self.MARKET_TYPE == "spot":
+                quote_available = balances.get(self.QUOTE_ASSET, 0.0)
+                if quote_available < order_notional:
+                    print(
+                        f"Insufficient {self.QUOTE_ASSET} balance. "
+                        f"Have: {quote_available}, Need: {order_notional}"
+                    )
+                    return None
+            else:
+                collateral_available = balances.get(self.COLLATERAL_ASSET, 0.0)
+                if collateral_available <= 0:
+                    print(
+                        f"No detectable {self.COLLATERAL_ASSET} collateral. "
+                        "Attempting order; ensure your perp account is funded."
+                    )
             
-            print(f"Placing buy order: {self.GRID_ORDER_SIZE} FEUSD at {price} USDC")
+            print(
+                f"Placing buy order: {self.GRID_ORDER_SIZE} {self.BASE_ASSET} at "
+                f"{price} {self.QUOTE_ASSET}"
+            )
             
             # Place the order
             order_result = self.exchange.order(
@@ -387,20 +563,36 @@ class GridTrader:
         try:
             # Round price to 6 decimal places
             price = round(price, 6)
+            price = _round_value_to_tick(price, self.TICK_SIZE)
             
             # Check if we already have an order at this price
             if price in self.active_orders:
                 print(f"Already have an order at price {price}. Skipping.")
                 return None
             
-            # Check if we have enough balance
+            # Check balances depending on market type
             balances = self.check_balances()
             
-            if balances["FEUSD"] < self.GRID_ORDER_SIZE:
-                print(f"Insufficient FEUSD balance. Have: {balances['FEUSD']}, Need: {self.GRID_ORDER_SIZE}")
-                return None
+            if self.MARKET_TYPE == "spot":
+                base_available = balances.get(self.BASE_ASSET, 0.0)
+                if base_available < self.GRID_ORDER_SIZE:
+                    print(
+                        f"Insufficient {self.BASE_ASSET} balance. "
+                        f"Have: {base_available}, Need: {self.GRID_ORDER_SIZE}"
+                    )
+                    return None
+            else:
+                collateral_available = balances.get(self.COLLATERAL_ASSET, 0.0)
+                if collateral_available <= 0:
+                    print(
+                        f"No detectable {self.COLLATERAL_ASSET} collateral. "
+                        "Attempting order; ensure your perp account is funded."
+                    )
             
-            print(f"Placing sell order: {self.GRID_ORDER_SIZE} FEUSD at {price} USDC")
+            print(
+                f"Placing sell order: {self.GRID_ORDER_SIZE} {self.BASE_ASSET} at "
+                f"{price} {self.QUOTE_ASSET}"
+            )
             
             # Place the order
             order_result = self.exchange.order(
@@ -475,6 +667,7 @@ class GridTrader:
             # For a filled buy order, place a sell order at the next grid level up
             sell_price = price + self.GRID_STEP
             sell_price = round(sell_price, 6)
+            sell_price = _round_value_to_tick(sell_price, self.TICK_SIZE)
             
             # Check if the sell price is within grid boundaries
             if sell_price <= self.GRID_UPPER_BOUNDARY:
@@ -491,6 +684,7 @@ class GridTrader:
             # For a filled sell order, place a buy order at the next grid level down
             buy_price = price - self.GRID_STEP
             buy_price = round(buy_price, 6)
+            buy_price = _round_value_to_tick(buy_price, self.TICK_SIZE)
             
             # Check if the buy price is within grid boundaries
             if buy_price >= self.GRID_LOWER_BOUNDARY:
@@ -509,7 +703,7 @@ class GridTrader:
         
         try:
             # Get all open orders
-            open_orders = self.info.open_orders(self.address)
+            open_orders = self.info.open_orders(self.address, self.DEX)
             current_order_ids = set()
             
             # Track which price levels currently have active orders
@@ -646,7 +840,7 @@ class GridTrader:
         print("Canceling all existing orders...")
         try:
             # Get all open orders
-            open_orders = self.info.open_orders(self.address)
+            open_orders = self.info.open_orders(self.address, self.DEX)
             print("Open orders:")
             print(json.dumps(open_orders, indent=2))
             
@@ -654,18 +848,18 @@ class GridTrader:
             canceled_count = 0
             
             # Filter orders for our specific trading pair
-            feusd_orders = []
+            symbol_orders = []
             for order in open_orders:
                 # For spot trading, the coin format might be '@153' for FEUSD
                 if isinstance(order, dict) and "coin" in order:
                     if order["coin"] == self.SYMBOL or order["coin"] == f"@{self.SPOT_ASSET_INDEX}":
-                        feusd_orders.append(order)
+                        symbol_orders.append(order)
             
-            print(f"Found {len(feusd_orders)} FEUSD orders to cancel")
+            print(f"Found {len(symbol_orders)} {self.SYMBOL} orders to cancel")
             
             # Prepare batch cancel request
             cancels = []
-            for order in feusd_orders:
+            for order in symbol_orders:
                 order_id = order.get("oid")
                 if order_id:
                     # For spot trading, we need to use the asset ID
@@ -696,7 +890,7 @@ class GridTrader:
                     
                     # Fallback to individual cancellations if batch fails
                     print("Falling back to individual cancellations...")
-                    for order in feusd_orders:
+                    for order in symbol_orders:
                         try:
                             order_id = order.get("oid")
                             if order_id:
